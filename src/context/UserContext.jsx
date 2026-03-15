@@ -2,7 +2,7 @@ import axios from 'axios'
 import React, { createContext, useEffect, useState } from 'react'
 export const userDataContext = createContext()
 function UserContext({ children }) {
-  const serverUrl = 'http://localhost:5173'
+  const serverUrl = 'http://localhost:5000'
   const [userData, setUserData] = useState(null)
   const [frontendImage, setFrontendImage] = useState(null)
   const [backendImage, setBackendImage] = useState(null)
@@ -26,9 +26,12 @@ function UserContext({ children }) {
         { command },
         { withCredentials: true }
       )
+      console.log('Gemini result:', result.data)
       return result.data
     } catch (error) {
-      console.log(error)
+      console.log('Status:', error.response?.status)
+      console.log('Message:', error.response?.data)
+      console.log('Full error:', error.message)
     }
   }
 
