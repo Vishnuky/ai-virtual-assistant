@@ -19,334 +19,275 @@ import { MdLogout, MdTune } from 'react-icons/md'
 function Home() {
   const { userData, serverUrl, setUserData, getGeminiResponse } =
     useContext(userDataContext)
+
   const navigate = useNavigate()
 
   const [listening, setListening] = useState(false)
-  const [userText, setUserText] = useState('')
   const [aiText, setAiText] = useState('')
-  const [ham, setHam] = useState(false)
+  const [userText, setUserText] = useState('')
   const [inputText, setInputText] = useState('')
+  const [ham, setHam] = useState(false)
   const [micEnabled, setMicEnabled] = useState(true)
 
   const recognitionRef = useRef(null)
-  const isSpeakingRef = useRef(false)
-  const isRecognizingRef = useRef(false)
   const isProcessingRef = useRef(false)
-  const micEnabledRef = useRef(true)
-
   const synth = window.speechSynthesis
 
   /* ---------------- LOGOUT ---------------- */
   const handleLogOut = async () => {
     try {
-      await axios.get(`${serverUrl}/api/auth/logout`, { withCredentials: true })
-    } catch (err) {
-      console.error(err)
-    } finally {
-      setUserData(null)
-      navigate('/signin')
-    }
+      await axios.get(`${serverUrl}/api/auth/logout`, {
+        withCredentials: true,
+      })
+    } catch {}
+    setUserData(null)
+    navigate('/signin')
   }
 
   /* ---------------- SPEAK ---------------- */
   const speak = useCallback(text => {
     if (!text) return
     synth.cancel()
-
-    const utterance = new SpeechSynthesisUtterance(text)
-    utterance.lang = 'en-US'
-    const voices = synth.getVoices()
-    const englishVoice = voices.find(v => v.lang === 'en-US')
-    if (englishVoice) utterance.voice = englishVoice
-
-    isSpeakingRef.current = true
-
-    utterance.onend = () => {
-      isSpeakingRef.current = false
-      setAiText('')
-      if (micEnabledRef.current) startRecognition(800)
-    }
-
-    synth.speak(utterance)
+    const utter = new SpeechSynthesisUtterance(text)
+    utter.lang = 'en-IN'
+    synth.speak(utter)
   }, [])
 
-  /* ---------------- COMMAND HANDLER ---------------- */
-  const handleCommand = useCallback(
-    data => {
-      if (!data) return
-      const { type, userInput, response } = data
-      speak(response)
+  /* ---------------- COMMAND EXECUTION ---------------- */
+ const handleCommand = (data) => {
+  if (!data) return
 
-      const query = encodeURIComponent(userInput || '')
-      const routes = {
-        'google-search': `https://www.google.com/search?q=${query}`,
-        'calculator-open': `https://www.google.com/search?q=calculator`,
-        'instagram-open': 'https://www.instagram.com/',
-        'facebook-open': 'https://www.facebook.com/',
-        'weather-show': `https://www.google.com/search?q=weather`,
-        'youtube-search': `https://www.youtube.com/results?search_query=${query}`,
-        'youtube-play': `https://www.youtube.com/results?search_query=${query}`,
+  const { type, userInput, response } = data
+  const query = encodeURIComponent(userInput || '')
+
+  console.log("⚡ Executing:", type)
+
+  // 🔊 ALWAYS speak first
+  if (response) speak(response)
+
+  // ⏳ delay action so speech starts
+  setTimeout(() => {
+
+    switch (type) {
+
+      case 'youtube-play':
+      case 'youtube-search':
+        window.open(`https://www.youtube.com/results?search_query=${query}`, '_blank')
+        break
+
+      case 'facebook-open':
+        window.open(`https://www.facebook.com/`, '_blank')
+        break
+
+      case 'google-search':
+        window.open(`https://www.google.com/search?q=${query}`, '_blank')
+        break
+
+      default:
+        // 🔥 chatbot-style fallback (important for your case)
+        if (userInput) {
+          window.open(`https://www.google.com/search?q=${query}`, '_blank')
+        }
+        break
+    }
+
+  }, 700) // delay ensures speech starts first
+}
+  // processCommand is now in Home.jsx to access getGeminiResponse directly and avoid unnecessary API calls from backend
+  const processCommand = async text => {
+    if (!text || isProcessingRef.current) return
+
+    isProcessingRef.current = true
+    console.log('🚀 Processing:', text)
+
+    try {
+      let data = await getGeminiResponse(text)
+
+      console.log('🧠 AI:', data)
+
+      // 🔥 FIX: override wrong AI responses
+      const lower = text.toLowerCase()
+
+      if (lower.includes('youtube')) {
+        data.type = 'youtube-play'
+        data.userInput = 'youtube'
       }
 
-      if (routes[type]) window.open(routes[type], '_blank')
-    },
-    [speak]
-  )
-
-  /* ---------------- PROCESS COMMAND ---------------- */
-  const processCommand = useCallback(
-    async transcript => {
-      if (isProcessingRef.current) return
-      isProcessingRef.current = true
-
-      recognitionRef.current?.stop()
-      setUserText(transcript)
-      setAiText('')
-
-      try {
-        const data = await getGeminiResponse(transcript)
-        if (data?.response) setAiText(data.response)
-        setUserText('')
-        handleCommand(data)
-      } catch (err) {
-        console.error('Gemini error:', err)
-        setUserText('')
-      } finally {
-        isProcessingRef.current = false
+      if (lower.includes('facebook')) {
+        data.type = 'facebook-open'
+        data.userInput = 'facebook'
       }
-    },
-    [getGeminiResponse, handleCommand]
-  )
 
-  /* ---------------- TEXT SUBMIT ---------------- */
-  const handleTextSubmit = () => {
-    const text = inputText.trim()
-    if (!text) return
-    setInputText('')
-    processCommand(text)
-  }
+      if (lower.includes('google')) {
+        data.type = 'google-search'
+        data.userInput = text
+      }
 
-  /* ---------------- START RECOGNITION ---------------- */
-  const startRecognition = (delay = 0) => {
-    if (
-      !recognitionRef.current ||
-      isSpeakingRef.current ||
-      isRecognizingRef.current ||
-      isProcessingRef.current ||
-      !micEnabledRef.current
-    )
-      return
+      setAiText(data?.response || '')
+      handleCommand(data)
+    } catch (err) {
+      console.error(err)
+    }
 
     setTimeout(() => {
-      try {
-        recognitionRef.current.start()
-      } catch (err) {
-        if (err.name !== 'InvalidStateError') console.error(err)
-      }
-    }, delay)
+      isProcessingRef.current = false
+    }, 1000)
   }
 
-  /* ---------------- TOGGLE MIC ---------------- */
+  /* ---------------- MIC CONTROL ---------------- */
   const toggleMic = () => {
-    const newState = !micEnabledRef.current
-    micEnabledRef.current = newState
-    setMicEnabled(newState)
+    const state = !micEnabled
+    setMicEnabled(state)
 
-    if (!newState) {
-      recognitionRef.current?.stop()
-      setListening(false)
+    if (state) {
+      startListening()
     } else {
-      startRecognition(300)
+      recognitionRef.current?.stop()
     }
   }
 
-  /* ---------------- SETUP RECOGNITION ---------------- */
+  const startListening = () => {
+    if (!recognitionRef.current || !micEnabled) return
+
+    try {
+      recognitionRef.current.start()
+    } catch {}
+  }
+
+  /* ---------------- SPEECH SETUP ---------------- */
   useEffect(() => {
     if (!userData) return
 
     const SpeechRecognition =
       window.SpeechRecognition || window.webkitSpeechRecognition
 
-    if (!SpeechRecognition) {
-      console.warn('Speech Recognition not supported')
-      return
-    }
+    if (!SpeechRecognition) return
 
     const recognition = new SpeechRecognition()
     recognition.continuous = true
-    recognition.lang = 'en-US'
+    recognition.lang = 'en-IN'
     recognition.interimResults = false
+
     recognitionRef.current = recognition
 
     recognition.onstart = () => {
-      isRecognizingRef.current = true
+      console.log('🎙️ Mic started')
       setListening(true)
     }
 
     recognition.onend = () => {
-      isRecognizingRef.current = false
       setListening(false)
-      if (micEnabledRef.current && !isProcessingRef.current) {
-        startRecognition(1000)
+
+      if (micEnabled && !isProcessingRef.current) {
+        setTimeout(() => {
+          startListening()
+        }, 600)
       }
     }
 
-    recognition.onerror = e => {
-      isRecognizingRef.current = false
+    recognition.onerror = () => {
       setListening(false)
-      if (e.error === 'aborted' || e.error === 'not-allowed') return
-      if (micEnabledRef.current && !isProcessingRef.current) {
-        startRecognition(1000)
-      }
+      if (micEnabled) startListening()
     }
 
-    recognition.onresult = async e => {
+    recognition.onresult = e => {
       const transcript = e.results[e.results.length - 1][0].transcript.trim()
-      console.log('Heard:', transcript)
 
-      if (
-        transcript
-          .toLowerCase()
-          .includes(userData.assistantName.toLowerCase()) &&
-        !isProcessingRef.current
-      ) {
-        processCommand(transcript)
+      console.log('🎤 Heard:', transcript)
+
+      const wake = userData.assistantName.toLowerCase()
+      const lower = transcript.toLowerCase()
+
+      if (lower.startsWith(wake)) {
+        const clean = transcript.slice(wake.length).trim()
+
+        console.log('🧠 Command:', clean)
+
+        if (clean) processCommand(clean)
       }
     }
 
-    const greet = new SpeechSynthesisUtterance(
-      `Hello ${userData.name}, what can I help you with?`
-    )
-    greet.lang = 'en-US'
-    greet.onend = () => {
-      isSpeakingRef.current = false
-      if (micEnabledRef.current) startRecognition(500)
-    }
-    isSpeakingRef.current = true
-    synth.speak(greet)
+    // Greeting
+    setTimeout(() => {
+      speak(`Hello ${userData.name}`)
+    }, 500)
+
+    startListening()
 
     return () => {
       recognition.stop()
       synth.cancel()
-      isRecognizingRef.current = false
-      isSpeakingRef.current = false
     }
   }, [userData])
 
   /* ---------------- UI ---------------- */
   return (
-    <div className="w-full h-[100vh] bg-gradient-to-t from-black to-[#02023d] flex overflow-hidden relative">
-      {/* ── TOP BAR (always visible) ── */}
-      <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-5 py-4 z-10">
-        {/* App name / logo */}
-        <h2 className="text-white font-bold text-lg tracking-wide">
-          🤖 {userData?.assistantName || 'Assistant'}
-        </h2>
-
-        {/* Desktop buttons — visible on lg+ */}
-        <div className="hidden lg:flex items-center gap-3">
-          <button
-            onClick={() => navigate('/customize')}
-            className="flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 hover:bg-white/20 text-white text-sm transition border border-white/20"
-          >
-            <MdTune className="w-4 h-4" />
-            Customize
-          </button>
-          <button
-            onClick={handleLogOut}
-            className="flex items-center gap-2 px-4 py-2 rounded-full bg-red-500/20 hover:bg-red-500/40 text-red-400 text-sm transition border border-red-500/30"
-          >
-            <MdLogout className="w-4 h-4" />
-            Log Out
-          </button>
-        </div>
-
-        {/* Mobile hamburger */}
-        <CgMenuRight
-          className="lg:hidden text-white w-6 h-6 cursor-pointer"
-          onClick={() => setHam(true)}
-        />
+    <div className="w-full h-screen bg-gradient-to-t from-black to-[#02023d] flex flex-col">
+      {/* TOP BAR */}
+      <div className="flex justify-between p-4 text-white">
+        <h2>🤖 {userData?.assistantName}</h2>
+        <CgMenuRight onClick={() => setHam(true)} className="cursor-pointer" />
       </div>
 
-      {/* ── MOBILE MENU ── */}
+      {/* MENU */}
       {ham && (
-        <div className="absolute inset-0 bg-black/70 backdrop-blur-lg p-6 flex flex-col gap-4 z-20">
-          <RxCross1
-            className="text-white absolute top-5 right-5 w-6 h-6 cursor-pointer"
-            onClick={() => setHam(false)}
-          />
-          <h2 className="text-white font-bold text-xl mt-8">Menu</h2>
+        <div className="absolute inset-0 bg-black/80 p-6 flex flex-col gap-4">
+          <RxCross1 onClick={() => setHam(false)} className="text-white" />
+
           <button
-            onClick={() => {
-              setHam(false)
-              navigate('/customize')
-            }}
-            className="flex items-center gap-3 px-4 py-3 rounded-xl bg-white/10 hover:bg-white/20 text-white transition"
+            onClick={() => navigate('/customize')}
+            className="text-white flex gap-2"
           >
-            <MdTune className="w-5 h-5" /> Customize Assistant
+            <MdTune /> Customize
           </button>
-          <button
-            onClick={handleLogOut}
-            className="flex items-center gap-3 px-4 py-3 rounded-xl bg-red-500/20 hover:bg-red-500/40 text-red-400 transition"
-          >
-            <MdLogout className="w-5 h-5" /> Log Out
+
+          <button onClick={handleLogOut} className="text-red-400 flex gap-2">
+            <MdLogout /> Logout
           </button>
         </div>
       )}
 
-      {/* ── MAIN CONTENT ── */}
-      <div className="flex-1 flex flex-col items-center justify-center gap-4 pt-16 px-4">
-        <div className="w-[300px] h-[400px] rounded-xl overflow-hidden shadow-lg">
-          <img
-            src={userData?.assistantImage}
-            alt="assistant"
-            className="h-full w-full object-cover"
-          />
-        </div>
+      {/* MAIN */}
+      <div className="flex-1 flex flex-col items-center justify-center text-white">
+        <img
+          src={userData?.assistantImage}
+          className="w-[200px] h-[250px] rounded-xl object-cover"
+        />
 
-        <h1 className="text-white font-semibold">
-          I'm {userData?.assistantName}
-        </h1>
-
-        <p className="text-gray-400 text-sm">
-          {!micEnabled
-            ? '🔇 Mic Off'
-            : listening
+        <p className="mt-2">
+          {micEnabled
+            ? listening
               ? '🎙️ Listening...'
-              : '⏸️ Waiting...'}
+              : '⏳ Restarting...'
+            : '🔇 Mic Off'}
         </p>
 
-        <img src={aiText ? aiImg : userImg} alt="state" className="w-[150px]" />
+        <img src={aiText ? aiImg : userImg} className="w-[120px]" />
 
-        <h1 className="text-white text-center px-4 min-h-[28px]">
-          {userText || aiText || ''}
-        </h1>
+        <p className="text-center px-4">{userText || aiText}</p>
 
-        <div className="w-[90%] max-w-[500px] flex items-center gap-2 bg-white/10 border border-white/20 rounded-full px-4 py-2 mt-2">
+        {/* INPUT + MIC */}
+        <div className="flex gap-2 mt-4 bg-white rounded-full px-4 py-2 w-[90%] max-w-[500px] items-center shadow-lg">
           <input
-            type="text"
             value={inputText}
             onChange={e => setInputText(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleTextSubmit()}
-            placeholder={`Ask ${userData?.assistantName || 'assistant'} anything...`}
-            className="flex-1 bg-transparent outline-none text-white placeholder-gray-400 text-[15px]"
+            onKeyDown={e => e.key === 'Enter' && processCommand(inputText)}
+            placeholder="Ask something..."
+            className="flex-1 bg-transparent outline-none text-black"
           />
-          <button
-            onClick={handleTextSubmit}
-            disabled={!inputText.trim()}
-            className="text-white hover:text-blue-400 transition disabled:opacity-30"
-          >
-            <AiOutlineSend className="w-5 h-5" />
+
+          <button onClick={() => processCommand(inputText)}>
+            <AiOutlineSend size={20} />
           </button>
+
+          {/* 🎤 MIC BUTTON */}
           <button
             onClick={toggleMic}
-            className={`transition ${micEnabled ? 'text-blue-400 hover:text-white' : 'text-red-400 hover:text-white'}`}
+            className={`p-2 rounded-full ${
+              micEnabled ? 'bg-blue-500 text-white' : 'bg-red-500 text-white'
+            }`}
           >
-            {micEnabled ? (
-              <BsMicFill className="w-5 h-5" />
-            ) : (
-              <BsMicMuteFill className="w-5 h-5" />
-            )}
+            {micEnabled ? <BsMicFill /> : <BsMicMuteFill />}
           </button>
         </div>
       </div>
