@@ -1,4 +1,10 @@
-import React, { useContext, useEffect, useRef, useState, useCallback } from 'react'
+import React, {
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  useCallback,
+} from 'react'
 import { userDataContext } from '../context/UserContext'
 import { useNavigate } from 'react-router-dom'
 import axios from 'axios'
@@ -8,6 +14,7 @@ import { CgMenuRight } from 'react-icons/cg'
 import { RxCross1 } from 'react-icons/rx'
 import { AiOutlineSend } from 'react-icons/ai'
 import { BsMicFill, BsMicMuteFill } from 'react-icons/bs'
+import { MdLogout, MdTune } from 'react-icons/md'
 
 function Home() {
   const { userData, serverUrl, setUserData, getGeminiResponse } =
@@ -64,46 +71,52 @@ function Home() {
   }, [])
 
   /* ---------------- COMMAND HANDLER ---------------- */
-  const handleCommand = useCallback(data => {
-    if (!data) return
-    const { type, userInput, response } = data
-    speak(response)
+  const handleCommand = useCallback(
+    data => {
+      if (!data) return
+      const { type, userInput, response } = data
+      speak(response)
 
-    const query = encodeURIComponent(userInput || '')
-    const routes = {
-      'google-search': `https://www.google.com/search?q=${query}`,
-      'calculator-open': `https://www.google.com/search?q=calculator`,
-      'instagram-open': 'https://www.instagram.com/',
-      'facebook-open': 'https://www.facebook.com/',
-      'weather-show': `https://www.google.com/search?q=weather`,
-      'youtube-search': `https://www.youtube.com/results?search_query=${query}`,
-      'youtube-play': `https://www.youtube.com/results?search_query=${query}`,
-    }
+      const query = encodeURIComponent(userInput || '')
+      const routes = {
+        'google-search': `https://www.google.com/search?q=${query}`,
+        'calculator-open': `https://www.google.com/search?q=calculator`,
+        'instagram-open': 'https://www.instagram.com/',
+        'facebook-open': 'https://www.facebook.com/',
+        'weather-show': `https://www.google.com/search?q=weather`,
+        'youtube-search': `https://www.youtube.com/results?search_query=${query}`,
+        'youtube-play': `https://www.youtube.com/results?search_query=${query}`,
+      }
 
-    if (routes[type]) window.open(routes[type], '_blank')
-  }, [speak])
+      if (routes[type]) window.open(routes[type], '_blank')
+    },
+    [speak]
+  )
 
-  /* ---------------- PROCESS COMMAND (shared by mic + text) ---------------- */
-  const processCommand = useCallback(async transcript => {
-    if (isProcessingRef.current) return
-    isProcessingRef.current = true
+  /* ---------------- PROCESS COMMAND ---------------- */
+  const processCommand = useCallback(
+    async transcript => {
+      if (isProcessingRef.current) return
+      isProcessingRef.current = true
 
-    recognitionRef.current?.stop()
-    setUserText(transcript)
-    setAiText('')
+      recognitionRef.current?.stop()
+      setUserText(transcript)
+      setAiText('')
 
-    try {
-      const data = await getGeminiResponse(transcript)
-      if (data?.response) setAiText(data.response)
-      setUserText('')
-      handleCommand(data)
-    } catch (err) {
-      console.error('Gemini error:', err)
-      setUserText('')
-    } finally {
-      isProcessingRef.current = false
-    }
-  }, [getGeminiResponse, handleCommand])
+      try {
+        const data = await getGeminiResponse(transcript)
+        if (data?.response) setAiText(data.response)
+        setUserText('')
+        handleCommand(data)
+      } catch (err) {
+        console.error('Gemini error:', err)
+        setUserText('')
+      } finally {
+        isProcessingRef.current = false
+      }
+    },
+    [getGeminiResponse, handleCommand]
+  )
 
   /* ---------------- TEXT SUBMIT ---------------- */
   const handleTextSubmit = () => {
@@ -119,8 +132,10 @@ function Home() {
       !recognitionRef.current ||
       isSpeakingRef.current ||
       isRecognizingRef.current ||
+      isProcessingRef.current ||
       !micEnabledRef.current
-    ) return
+    )
+      return
 
     setTimeout(() => {
       try {
@@ -171,15 +186,18 @@ function Home() {
     recognition.onend = () => {
       isRecognizingRef.current = false
       setListening(false)
-      if (micEnabledRef.current) startRecognition(1000)
+      if (micEnabledRef.current && !isProcessingRef.current) {
+        startRecognition(1000)
+      }
     }
 
     recognition.onerror = e => {
-      console.error('Recognition error:', e.error)
       isRecognizingRef.current = false
       setListening(false)
       if (e.error === 'aborted' || e.error === 'not-allowed') return
-      if (micEnabledRef.current) startRecognition(1000)
+      if (micEnabledRef.current && !isProcessingRef.current) {
+        startRecognition(1000)
+      }
     }
 
     recognition.onresult = async e => {
@@ -187,14 +205,15 @@ function Home() {
       console.log('Heard:', transcript)
 
       if (
-        transcript.toLowerCase().includes(userData.assistantName.toLowerCase()) &&
+        transcript
+          .toLowerCase()
+          .includes(userData.assistantName.toLowerCase()) &&
         !isProcessingRef.current
       ) {
         processCommand(transcript)
       }
     }
 
-    // ✅ Start mic only after greeting finishes
     const greet = new SpeechSynthesisUtterance(
       `Hello ${userData.name}, what can I help you with?`
     )
@@ -216,74 +235,121 @@ function Home() {
 
   /* ---------------- UI ---------------- */
   return (
-    <div className="w-full h-[100vh] bg-gradient-to-t from-black to-[#02023d] flex flex-col items-center justify-center gap-4 overflow-hidden">
+    <div className="w-full h-[100vh] bg-gradient-to-t from-black to-[#02023d] flex overflow-hidden relative">
+      {/* ── TOP BAR (always visible) ── */}
+      <div className="absolute top-0 left-0 right-0 flex items-center justify-between px-5 py-4 z-10">
+        {/* App name / logo */}
+        <h2 className="text-white font-bold text-lg tracking-wide">
+          🤖 {userData?.assistantName || 'Assistant'}
+        </h2>
 
-      <CgMenuRight
-        className="lg:hidden text-white absolute top-5 right-5 w-6 h-6 cursor-pointer"
-        onClick={() => setHam(true)}
-      />
+        {/* Desktop buttons — visible on lg+ */}
+        <div className="hidden lg:flex items-center gap-3">
+          <button
+            onClick={() => navigate('/customize')}
+            className="flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 hover:bg-white/20 text-white text-sm transition border border-white/20"
+          >
+            <MdTune className="w-4 h-4" />
+            Customize
+          </button>
+          <button
+            onClick={handleLogOut}
+            className="flex items-center gap-2 px-4 py-2 rounded-full bg-red-500/20 hover:bg-red-500/40 text-red-400 text-sm transition border border-red-500/30"
+          >
+            <MdLogout className="w-4 h-4" />
+            Log Out
+          </button>
+        </div>
 
+        {/* Mobile hamburger */}
+        <CgMenuRight
+          className="lg:hidden text-white w-6 h-6 cursor-pointer"
+          onClick={() => setHam(true)}
+        />
+      </div>
+
+      {/* ── MOBILE MENU ── */}
       {ham && (
-        <div className="absolute inset-0 bg-black/60 backdrop-blur-lg p-5 flex flex-col gap-5 z-10">
+        <div className="absolute inset-0 bg-black/70 backdrop-blur-lg p-6 flex flex-col gap-4 z-20">
           <RxCross1
             className="text-white absolute top-5 right-5 w-6 h-6 cursor-pointer"
             onClick={() => setHam(false)}
           />
-          <button onClick={handleLogOut} className="btn">Log Out</button>
-          <button onClick={() => navigate('/customize')} className="btn">Customize Assistant</button>
+          <h2 className="text-white font-bold text-xl mt-8">Menu</h2>
+          <button
+            onClick={() => {
+              setHam(false)
+              navigate('/customize')
+            }}
+            className="flex items-center gap-3 px-4 py-3 rounded-xl bg-white/10 hover:bg-white/20 text-white transition"
+          >
+            <MdTune className="w-5 h-5" /> Customize Assistant
+          </button>
+          <button
+            onClick={handleLogOut}
+            className="flex items-center gap-3 px-4 py-3 rounded-xl bg-red-500/20 hover:bg-red-500/40 text-red-400 transition"
+          >
+            <MdLogout className="w-5 h-5" /> Log Out
+          </button>
         </div>
       )}
 
-      <div className="w-[300px] h-[400px] rounded-xl overflow-hidden shadow-lg">
-        <img
-          src={userData?.assistantImage}
-          alt="assistant"
-          className="h-full w-full object-cover"
-        />
+      {/* ── MAIN CONTENT ── */}
+      <div className="flex-1 flex flex-col items-center justify-center gap-4 pt-16 px-4">
+        <div className="w-[300px] h-[400px] rounded-xl overflow-hidden shadow-lg">
+          <img
+            src={userData?.assistantImage}
+            alt="assistant"
+            className="h-full w-full object-cover"
+          />
+        </div>
+
+        <h1 className="text-white font-semibold">
+          I'm {userData?.assistantName}
+        </h1>
+
+        <p className="text-gray-400 text-sm">
+          {!micEnabled
+            ? '🔇 Mic Off'
+            : listening
+              ? '🎙️ Listening...'
+              : '⏸️ Waiting...'}
+        </p>
+
+        <img src={aiText ? aiImg : userImg} alt="state" className="w-[150px]" />
+
+        <h1 className="text-white text-center px-4 min-h-[28px]">
+          {userText || aiText || ''}
+        </h1>
+
+        <div className="w-[90%] max-w-[500px] flex items-center gap-2 bg-white/10 border border-white/20 rounded-full px-4 py-2 mt-2">
+          <input
+            type="text"
+            value={inputText}
+            onChange={e => setInputText(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleTextSubmit()}
+            placeholder={`Ask ${userData?.assistantName || 'assistant'} anything...`}
+            className="flex-1 bg-transparent outline-none text-white placeholder-gray-400 text-[15px]"
+          />
+          <button
+            onClick={handleTextSubmit}
+            disabled={!inputText.trim()}
+            className="text-white hover:text-blue-400 transition disabled:opacity-30"
+          >
+            <AiOutlineSend className="w-5 h-5" />
+          </button>
+          <button
+            onClick={toggleMic}
+            className={`transition ${micEnabled ? 'text-blue-400 hover:text-white' : 'text-red-400 hover:text-white'}`}
+          >
+            {micEnabled ? (
+              <BsMicFill className="w-5 h-5" />
+            ) : (
+              <BsMicMuteFill className="w-5 h-5" />
+            )}
+          </button>
+        </div>
       </div>
-
-      <h1 className="text-white font-semibold">I'm {userData?.assistantName}</h1>
-
-      <p className="text-gray-400 text-sm">
-        {!micEnabled ? '🔇 Mic Off' : listening ? '🎙️ Listening...' : '⏸️ Waiting...'}
-      </p>
-
-      <img src={aiText ? aiImg : userImg} alt="state" className="w-[150px]" />
-
-      <h1 className="text-white text-center px-4 min-h-[28px]">
-        {userText || aiText || ''}
-      </h1>
-
-      {/* ✅ Search bar + mic toggle */}
-      <div className="w-[90%] max-w-[500px] flex items-center gap-2 bg-white/10 border border-white/20 rounded-full px-4 py-2 mt-2">
-        <input
-          type="text"
-          value={inputText}
-          onChange={e => setInputText(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && handleTextSubmit()}
-          placeholder={`Ask ${userData?.assistantName || 'assistant'} anything...`}
-          className="flex-1 bg-transparent outline-none text-white placeholder-gray-400 text-[15px]"
-        />
-
-        <button
-          onClick={handleTextSubmit}
-          disabled={!inputText.trim()}
-          className="text-white hover:text-blue-400 transition disabled:opacity-30"
-        >
-          <AiOutlineSend className="w-5 h-5" />
-        </button>
-
-        <button
-          onClick={toggleMic}
-          className={`transition ${micEnabled ? 'text-blue-400 hover:text-white' : 'text-red-400 hover:text-white'}`}
-        >
-          {micEnabled
-            ? <BsMicFill className="w-5 h-5" />
-            : <BsMicMuteFill className="w-5 h-5" />
-          }
-        </button>
-      </div>
-
     </div>
   )
 }
