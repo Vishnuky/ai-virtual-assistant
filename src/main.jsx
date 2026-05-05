@@ -5,7 +5,15 @@ import App from './App.jsx'
 import {BrowserRouter} from "react-router-dom"
 import UserContext from './context/UserContext.jsx'
 import axios from "axios"
-axios.defaults.withCredentials = true
+
+// Set backend URL (VERY IMPORTANT if deployed)
+axios.defaults.baseURL = "https://your-backend.onrender.com"
+
+// Restore token on refresh
+const token = localStorage.getItem("token")
+if (token) {
+  axios.defaults.headers.common["Authorization"] = `Bearer ${token}`
+}
 createRoot(document.getElementById('root')).render(
 <BrowserRouter>
 <UserContext>
