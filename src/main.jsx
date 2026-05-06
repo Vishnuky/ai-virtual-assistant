@@ -7,7 +7,7 @@ import UserContext from './context/UserContext.jsx'
 import axios from "axios"
 
 // Set backend URL (VERY IMPORTANT if deployed)
-axios.defaults.baseURL = "https://your-backend.onrender.com"
+axios.defaults.baseURL ="https://ai-virtual-assistant-backend-1.onrender.com"
 
 // Restore token on refresh
 const token = localStorage.getItem("token")
