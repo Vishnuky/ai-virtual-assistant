@@ -17,8 +17,7 @@ import { BsMicFill, BsMicMuteFill } from 'react-icons/bs'
 import { MdLogout, MdTune } from 'react-icons/md'
 
 function Home() {
-  const { userData, serverUrl, setUserData, getGeminiResponse } =
-    useContext(userDataContext)
+  const { userData, setUserData, getGeminiResponse } = useContext(userDataContext)
 
   const navigate = useNavigate()
 
@@ -36,10 +35,10 @@ function Home() {
   /* ---------------- LOGOUT ---------------- */
   const handleLogOut = async () => {
     try {
-      await axios.get(`${serverUrl}/api/auth/logout`, {
-        withCredentials: true,
-      })
+      await axios.get("/api/auth/logout")
     } catch {}
+    localStorage.removeItem("token")
+    delete axios.defaults.headers.common["Authorization"]
     setUserData(null)
     navigate('/signin')
   }
@@ -54,46 +53,41 @@ function Home() {
   }, [])
 
   /* ---------------- COMMAND EXECUTION ---------------- */
- const handleCommand = (data) => {
-  if (!data) return
+  const handleCommand = (data) => {
+    if (!data) return
 
-  const { type, userInput, response } = data
-  const query = encodeURIComponent(userInput || '')
+    const { type, userInput, response } = data
+    const query = encodeURIComponent(userInput || '')
 
-  console.log("⚡ Executing:", type)
+    console.log("⚡ Executing:", type)
 
-  // 🔊 ALWAYS speak first
-  if (response) speak(response)
+    if (response) speak(response)
 
-  // ⏳ delay action so speech starts
-  setTimeout(() => {
+    setTimeout(() => {
+      switch (type) {
+        case 'youtube-play':
+        case 'youtube-search':
+          window.open(`https://www.youtube.com/results?search_query=${query}`, '_blank')
+          break
 
-    switch (type) {
+        case 'facebook-open':
+          window.open(`https://www.facebook.com/`, '_blank')
+          break
 
-      case 'youtube-play':
-      case 'youtube-search':
-        window.open(`https://www.youtube.com/results?search_query=${query}`, '_blank')
-        break
-
-      case 'facebook-open':
-        window.open(`https://www.facebook.com/`, '_blank')
-        break
-
-      case 'google-search':
-        window.open(`https://www.google.com/search?q=${query}`, '_blank')
-        break
-
-      default:
-        // 🔥 chatbot-style fallback (important for your case)
-        if (userInput) {
+        case 'google-search':
           window.open(`https://www.google.com/search?q=${query}`, '_blank')
-        }
-        break
-    }
+          break
 
-  }, 700) // delay ensures speech starts first
-}
-  // processCommand is now in Home.jsx to access getGeminiResponse directly and avoid unnecessary API calls from backend
+        default:
+          if (userInput) {
+            window.open(`https://www.google.com/search?q=${query}`, '_blank')
+          }
+          break
+      }
+    }, 700)
+  }
+
+  /* ---------------- PROCESS COMMAND ---------------- */
   const processCommand = async text => {
     if (!text || isProcessingRef.current) return
 
@@ -105,7 +99,6 @@ function Home() {
 
       console.log('🧠 AI:', data)
 
-      // 🔥 FIX: override wrong AI responses
       const lower = text.toLowerCase()
 
       if (lower.includes('youtube')) {
@@ -148,7 +141,6 @@ function Home() {
 
   const startListening = () => {
     if (!recognitionRef.current || !micEnabled) return
-
     try {
       recognitionRef.current.start()
     } catch {}
@@ -177,7 +169,6 @@ function Home() {
 
     recognition.onend = () => {
       setListening(false)
-
       if (micEnabled && !isProcessingRef.current) {
         setTimeout(() => {
           startListening()
@@ -192,7 +183,6 @@ function Home() {
 
     recognition.onresult = e => {
       const transcript = e.results[e.results.length - 1][0].transcript.trim()
-
       console.log('🎤 Heard:', transcript)
 
       const wake = userData.assistantName.toLowerCase()
@@ -200,14 +190,11 @@ function Home() {
 
       if (lower.startsWith(wake)) {
         const clean = transcript.slice(wake.length).trim()
-
         console.log('🧠 Command:', clean)
-
         if (clean) processCommand(clean)
       }
     }
 
-    // Greeting
     setTimeout(() => {
       speak(`Hello ${userData.name}`)
     }, 500)
@@ -233,14 +220,12 @@ function Home() {
       {ham && (
         <div className="absolute inset-0 bg-black/80 p-6 flex flex-col gap-4">
           <RxCross1 onClick={() => setHam(false)} className="text-white" />
-
           <button
             onClick={() => navigate('/customize')}
             className="text-white flex gap-2"
           >
             <MdTune /> Customize
           </button>
-
           <button onClick={handleLogOut} className="text-red-400 flex gap-2">
             <MdLogout /> Logout
           </button>
@@ -275,12 +260,9 @@ function Home() {
             placeholder="Ask something..."
             className="flex-1 bg-transparent outline-none text-black"
           />
-
           <button onClick={() => processCommand(inputText)}>
             <AiOutlineSend size={20} />
           </button>
-
-          {/* 🎤 MIC BUTTON */}
           <button
             onClick={toggleMic}
             className={`p-2 rounded-full ${
