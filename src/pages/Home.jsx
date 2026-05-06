@@ -30,7 +30,6 @@ function Home() {
 
   const recognitionRef = useRef(null)
   const restartTimerRef = useRef(null)
-
   const isListeningRef = useRef(false)
   const isProcessingRef = useRef(false)
   const micEnabledRef = useRef(true)
@@ -51,17 +50,11 @@ function Home() {
 
     try {
       recognitionRef.current.start()
-    } catch (e) {
-      console.log('Start blocked:', e.message)
-    }
+    } catch {}
   }
 
-  /* ---------------- SCHEDULE RESTART ---------------- */
   const scheduleRestart = useCallback(() => {
-    if (restartTimerRef.current) {
-      clearTimeout(restartTimerRef.current)
-    }
-
+    if (restartTimerRef.current) clearTimeout(restartTimerRef.current)
     restartTimerRef.current = setTimeout(() => {
       safeStart()
     }, 800)
@@ -80,25 +73,13 @@ function Home() {
     })
   }, [])
 
-  /* ---------------- ACTION ---------------- */
-  const executeAction = useCallback(async (data, originalText) => {
-    if (!data) return
-
-    const { response, userInput } = data
-    const query = encodeURIComponent(userInput || originalText || '')
-
-    let speechText = response || 'Here is what I found'
-    let url = `https://www.google.com/search?q=${query}`
-
-    setAiText(speechText)
-    await speak(speechText)
-
-    if (url) {
-      window.open(url, '_blank')
-    }
+  /* ---------------- COMMAND ---------------- */
+  const executeAction = useCallback(async (data, text) => {
+    const response = data?.response || 'Here is what I found'
+    setAiText(response)
+    await speak(response)
   }, [speak])
 
-  /* ---------------- QUEUE ---------------- */
   const processQueue = useCallback(async () => {
     if (isQueueRunningRef.current) return
     isQueueRunningRef.current = true
@@ -126,11 +107,11 @@ function Home() {
     scheduleRestart()
   }, [executeAction, getGeminiResponse, speak, scheduleRestart])
 
-  const addCommand = useCallback((text) => {
-    if (!text?.trim()) return
+  const addCommand = (text) => {
+    if (!text || !text.trim()) return
     commandQueueRef.current.push(text.trim())
     processQueue()
-  }, [processQueue])
+  }
 
   /* ---------------- MIC SETUP ---------------- */
   useEffect(() => {
@@ -139,10 +120,7 @@ function Home() {
     const SpeechRecognition =
       window.SpeechRecognition || window.webkitSpeechRecognition
 
-    if (!SpeechRecognition) {
-      alert('Speech recognition not supported')
-      return
-    }
+    if (!SpeechRecognition) return
 
     const recognition = new SpeechRecognition()
     recognition.continuous = false
@@ -153,113 +131,114 @@ function Home() {
       isListeningRef.current = true
       setListening(true)
       setStatus('🎙️ Listening...')
-      console.log('🎙️ Listening...')
     }
 
     recognition.onend = () => {
       isListeningRef.current = false
       setListening(false)
-      console.log('🎙️ Mic ended')
-
       if (!micEnabledRef.current || isProcessingRef.current) return
       scheduleRestart()
     }
 
     recognition.onerror = (e) => {
-      console.log('🎙️ Error:', e.error)
-
-      isListeningRef.current = false
-      setListening(false)
-
       if (e.error === 'aborted') return
-
       if (e.error === 'not-allowed') {
         micEnabledRef.current = false
         setMicEnabled(false)
         setStatus('🔇 Mic blocked')
         return
       }
-
       scheduleRestart()
     }
 
     recognition.onresult = (e) => {
       const transcript = e.results[0][0].transcript.toLowerCase().trim()
-      console.log('🎤 Heard:', transcript)
+      const wake = userData.assistantName?.toLowerCase() || 'assistant'
 
-      const wakeWord = userData.assistantName?.toLowerCase() || 'assistant'
-
-      if (transcript.includes(wakeWord)) {
-        const command = transcript.replace(wakeWord, '').trim()
-        if (command) {
-          console.log('🧠 Command:', command)
-          addCommand(command)
-        }
+      if (transcript.includes(wake)) {
+        const cmd = transcript.replace(wake, '').trim()
+        if (cmd) addCommand(cmd)
       }
     }
 
-    /* GREETING */
     setTimeout(async () => {
-      await speak(`Hello ${userData.name}, say ${userData.assistantName} to wake me.`)
+      await speak(`Hello ${userData.name}, say ${userData.assistantName}`)
       scheduleRestart()
-    }, 1000)
+    }, 800)
 
     return () => {
       if (restartTimerRef.current) clearTimeout(restartTimerRef.current)
-
-      try {
-        recognition.stop()
-      } catch {}
-
+      try { recognition.stop() } catch {}
       synth.cancel()
     }
   }, [userData])
 
-  /* ---------------- TOGGLE MIC ---------------- */
+  /* ---------------- FIXED BUTTONS ---------------- */
+
   const toggleMic = () => {
     const newState = !micEnabledRef.current
     micEnabledRef.current = newState
     setMicEnabled(newState)
 
     if (newState) {
+      setStatus('⏳ Ready...')
       scheduleRestart()
     } else {
-      if (restartTimerRef.current) clearTimeout(restartTimerRef.current)
       recognitionRef.current?.stop()
       setStatus('🔇 Mic Off')
     }
   }
 
-  /* ---------------- LOGOUT ---------------- */
-  const handleLogOut = async () => {
-    try { await axios.get("/api/auth/logout") } catch {}
-    localStorage.removeItem("token")
+  const handleSend = () => {
+    if (!inputText.trim()) return
+    addCommand(inputText)
+    setInputText('')
+  }
+
+  const handleLogout = async () => {
+    try {
+      await axios.get('/api/auth/logout')
+    } catch {}
+
+    localStorage.removeItem('token')
+    delete axios.defaults.headers.common['Authorization']
     setUserData(null)
-    navigate('/signin')
+
+    navigate('/signin', { replace: true })
+  }
+
+  const handleCustomize = () => {
+    setHam(false)
+    navigate('/customize')
   }
 
   /* ---------------- UI ---------------- */
   return (
     <div className="w-full h-screen bg-gradient-to-t from-black to-[#02023d] flex flex-col">
 
-      <div className="flex justify-between p-4 text-white">
+      {/* TOP */}
+      <div className="flex justify-between p-4 text-white items-center">
         <h2>🤖 {userData?.assistantName}</h2>
-        <CgMenuRight onClick={() => setHam(true)} />
+        <CgMenuRight onClick={() => setHam(true)} className="cursor-pointer" />
       </div>
 
+      {/* MENU */}
       {ham && (
-        <div className="absolute inset-0 bg-black/90 p-6 flex flex-col gap-6">
-          <RxCross1 onClick={() => setHam(false)} />
-          <button onClick={() => navigate('/customize')}>
+        <div className="absolute inset-0 bg-black/95 p-6 flex flex-col gap-6 z-50">
+          <RxCross1 onClick={() => setHam(false)} className="cursor-pointer text-white" />
+
+          <button onClick={handleCustomize} className="text-white flex gap-2">
             <MdTune /> Customize
           </button>
-          <button onClick={handleLogOut}>
+
+          <button onClick={handleLogout} className="text-red-400 flex gap-2">
             <MdLogout /> Logout
           </button>
         </div>
       )}
 
-      <div className="flex-1 flex flex-col items-center justify-center text-white gap-3">
+      {/* MAIN */}
+      <div className="flex-1 flex flex-col items-center justify-center text-white gap-3 px-4">
 
         <img src={userData?.assistantImage} className="w-[180px]" />
 
@@ -270,29 +249,36 @@ function Home() {
         {userText && <p>You: {userText}</p>}
         {aiText && <p>{aiText}</p>}
 
-        <div className="flex gap-2 bg-white rounded-full px-4 py-2 w-[90%] max-w-[500px]">
+        {/* INPUT */}
+        <div className="flex gap-2 mt-4 bg-white rounded-full px-4 py-2 w-[90%] max-w-[500px] items-center">
+
           <input
             value={inputText}
-            onChange={e => setInputText(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter') {
-                addCommand(inputText)
-                setInputText('')
-              }
+            onChange={(e) => setInputText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleSend()
             }}
-            className="flex-1 text-black"
+            placeholder="Type command..."
+            className="flex-1 bg-transparent outline-none text-black"
           />
 
-          <button onClick={() => {
-            addCommand(inputText)
-            setInputText('')
-          }}>
+          <button
+            onClick={handleSend}
+            disabled={!inputText.trim()}
+            className="disabled:opacity-30"
+          >
             <AiOutlineSend />
           </button>
 
-          <button onClick={toggleMic}>
+          <button
+            onClick={toggleMic}
+            className={`p-2 rounded-full ${
+              micEnabled ? 'bg-blue-500' : 'bg-red-500'
+            } text-white`}
+          >
             {micEnabled ? <BsMicFill /> : <BsMicMuteFill />}
           </button>
+
         </div>
 
       </div>
