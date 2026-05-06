@@ -29,8 +29,9 @@ function Home() {
 
   const recognitionRef = useRef(null)
   const isProcessingRef = useRef(false)
-  const micEnabledRef = useRef(true)        // ✅ ref tracks real-time mic state
-  const isListeningRef = useRef(false)      // ✅ prevents duplicate starts
+  const micEnabledRef = useRef(true)
+  const isListeningRef = useRef(false)
+  const restartTimerRef = useRef(null)   // ✅ tracks pending restart so we never double-schedule
   const synth = window.speechSynthesis
 
   /* ---------------- LOGOUT ---------------- */
@@ -53,6 +54,33 @@ function Home() {
     synth.speak(utter)
   }, [])
 
+  /* ---------------- SAFE RESTART ---------------- */
+  const scheduleRestart = useCallback(() => {
+    // ✅ Cancel any pending restart before scheduling a new one
+    if (restartTimerRef.current) {
+      clearTimeout(restartTimerRef.current)
+      restartTimerRef.current = null
+    }
+
+    restartTimerRef.current = setTimeout(() => {
+      restartTimerRef.current = null
+
+      // ✅ Only start if all conditions are met
+      if (
+        !micEnabledRef.current ||
+        isListeningRef.current ||
+        isProcessingRef.current ||
+        !recognitionRef.current
+      ) return
+
+      try {
+        recognitionRef.current.start()
+      } catch (e) {
+        console.log("Restart error:", e.message)
+      }
+    }, 500)
+  }, [])
+
   /* ---------------- COMMAND EXECUTION ---------------- */
   const handleCommand = useCallback((data) => {
     if (!data) return
@@ -71,11 +99,11 @@ function Home() {
         case 'facebook-open':
           window.open(`https://www.facebook.com/`, '_blank')
           break
-        case 'google-search':
-          window.open(`https://www.google.com/search?q=${query}`, '_blank')
-          break
         case 'instagram-open':
           window.open(`https://www.instagram.com/`, '_blank')
+          break
+        case 'google-search':
+          window.open(`https://www.google.com/search?q=${query}`, '_blank')
           break
         case 'weather-show':
           window.open(`https://www.google.com/search?q=weather+today`, '_blank')
@@ -99,8 +127,8 @@ function Home() {
   }, [speak])
 
   /* ---------------- PROCESS COMMAND ---------------- */
-  const processCommand = useCallback(async text => {
-    if (!text || isProcessingRef.current) return
+  const processCommand = useCallback(async (text) => {
+    if (!text?.trim() || isProcessingRef.current) return
 
     isProcessingRef.current = true
     setUserText(text)
@@ -118,67 +146,44 @@ function Home() {
 
       const lower = text.toLowerCase()
 
-      // ✅ Override AI type based on keywords
       if (lower.includes('youtube')) {
         data.type = 'youtube-search'
         data.userInput = text.replace(/youtube/gi, '').trim() || 'youtube'
+        data.response = data.response || 'Opening YouTube'
       }
       if (lower.includes('facebook')) {
         data.type = 'facebook-open'
+        data.response = data.response || 'Opening Facebook'
       }
       if (lower.includes('instagram')) {
         data.type = 'instagram-open'
-      }
-      if (lower.includes('google')) {
-        data.type = 'google-search'
-        data.userInput = text
+        data.response = data.response || 'Opening Instagram'
       }
       if (lower.includes('spotify')) {
-        data.type = 'google-search'
-        data.userInput = 'spotify'
+        data.type = 'general'
         data.response = 'Opening Spotify'
-        window.open('https://open.spotify.com', '_blank')
+        speak('Opening Spotify')
+        setTimeout(() => window.open('https://open.spotify.com', '_blank'), 700)
+      }
+      if (lower.includes('google') && !lower.includes('youtube')) {
+        data.type = 'google-search'
+        data.userInput = text
+        data.response = data.response || 'Searching Google'
       }
 
       setAiText(data?.response || '')
       handleCommand(data)
+
     } catch (err) {
       console.error(err)
       speak("Something went wrong")
     } finally {
+      // ✅ Release processing lock after 3 seconds
       setTimeout(() => {
         isProcessingRef.current = false
-      }, 2000)
+      }, 3000)
     }
   }, [getGeminiResponse, handleCommand, speak])
-
-  /* ---------------- START LISTENING ---------------- */
-  const startListening = useCallback(() => {
-    if (
-      !recognitionRef.current ||
-      !micEnabledRef.current ||
-      isListeningRef.current    // ✅ prevent duplicate starts
-    ) return
-
-    try {
-      recognitionRef.current.start()
-    } catch (e) {
-      console.log("Start error:", e.message)
-    }
-  }, [])
-
-  /* ---------------- TOGGLE MIC ---------------- */
-  const toggleMic = useCallback(() => {
-    const newState = !micEnabledRef.current
-    micEnabledRef.current = newState
-    setMicEnabled(newState)
-
-    if (newState) {
-      startListening()
-    } else {
-      recognitionRef.current?.stop()
-    }
-  }, [startListening])
 
   /* ---------------- SPEECH SETUP ---------------- */
   useEffect(() => {
@@ -193,7 +198,7 @@ function Home() {
     }
 
     const recognition = new SpeechRecognition()
-    recognition.continuous = false    // ✅ false prevents mic loop
+    recognition.continuous = false       // ✅ false = stops after each result, we restart manually
     recognition.lang = 'en-IN'
     recognition.interimResults = false
     recognition.maxAlternatives = 1
@@ -202,19 +207,16 @@ function Home() {
 
     recognition.onstart = () => {
       console.log('🎙️ Mic started')
-      isListeningRef.current = true   // ✅ mark as active
+      isListeningRef.current = true
       setListening(true)
     }
 
     recognition.onend = () => {
       console.log('🎙️ Mic ended')
-      isListeningRef.current = false  // ✅ mark as inactive
+      isListeningRef.current = false
       setListening(false)
-
-      // ✅ Only restart if mic is enabled and not processing
-      if (micEnabledRef.current && !isProcessingRef.current) {
-        setTimeout(() => startListening(), 300)
-      }
+      // ✅ Always go through scheduleRestart — never restart directly
+      if (micEnabledRef.current) scheduleRestart()
     }
 
     recognition.onerror = (e) => {
@@ -222,42 +224,70 @@ function Home() {
       isListeningRef.current = false
       setListening(false)
 
-      // ✅ Don't restart on no-speech — just let onend handle it
-      if (e.error === 'aborted') return
-
-      if (micEnabledRef.current) {
-        setTimeout(() => startListening(), 500)
+      // ✅ Don't restart on these errors
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+        micEnabledRef.current = false
+        setMicEnabled(false)
+        return
       }
+
+      // ✅ For all other errors, let onend handle restart via scheduleRestart
+      // Do NOT call scheduleRestart here — onend fires after onerror automatically
     }
 
-    recognition.onresult = e => {
+    recognition.onresult = (e) => {
       const transcript = e.results[e.results.length - 1][0].transcript.trim()
       console.log('🎤 Heard:', transcript)
 
-      // ✅ Flexible wake word matching — checks if wake word is ANYWHERE in transcript
       const wake = userData.assistantName.toLowerCase()
       const lower = transcript.toLowerCase()
 
       if (lower.includes(wake)) {
-        // Remove wake word from command
         const clean = lower.replace(wake, '').trim()
         console.log('🧠 Command:', clean)
         if (clean) processCommand(clean)
       }
     }
 
-    // Greeting on load
+    // Greeting
     setTimeout(() => {
       speak(`Hello ${userData.name}, I am ${userData.assistantName}. How can I help you?`)
     }, 500)
 
-    startListening()
+    // Start mic after greeting delay
+    setTimeout(() => {
+      if (micEnabledRef.current) {
+        try {
+          recognition.start()
+        } catch (e) {
+          console.log(e.message)
+        }
+      }
+    }, 1000)
 
     return () => {
+      if (restartTimerRef.current) clearTimeout(restartTimerRef.current)
       recognition.abort()
       synth.cancel()
     }
   }, [userData])
+
+  /* ---------------- TOGGLE MIC ---------------- */
+  const toggleMic = useCallback(() => {
+    const newState = !micEnabledRef.current
+    micEnabledRef.current = newState
+    setMicEnabled(newState)
+
+    if (newState) {
+      scheduleRestart()
+    } else {
+      if (restartTimerRef.current) {
+        clearTimeout(restartTimerRef.current)
+        restartTimerRef.current = null
+      }
+      recognitionRef.current?.abort()
+    }
+  }, [scheduleRestart])
 
   /* ---------------- UI ---------------- */
   return (
